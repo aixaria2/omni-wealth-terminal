@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, trades, performanceMetrics, InsertTrade, InsertPerformanceMetric } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,126 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Trade queries
+export async function saveTrade(userId: number, trade: InsertTrade): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn('[Database] Cannot save trade: database not available');
+    return;
+  }
+
+  try {
+    await db.insert(trades).values({
+      ...trade,
+      userId
+    });
+  } catch (error) {
+    console.error('[Database] Failed to save trade:', error);
+    throw error;
+  }
+}
+
+export async function getUserTrades(userId: number, limit: number = 100): Promise<any[]> {
+  const db = await getDb();
+  if (!db) {
+    console.warn('[Database] Cannot get trades: database not available');
+    return [];
+  }
+
+  try {
+    return await db
+      .select()
+      .from(trades)
+      .where(eq(trades.userId, userId))
+      .orderBy(desc(trades.createdAt))
+      .limit(limit);
+  } catch (error) {
+    console.error('[Database] Failed to get trades:', error);
+    return [];
+  }
+}
+
+export async function getTradesByDateRange(userId: number, startDate: Date, endDate: Date): Promise<any[]> {
+  const db = await getDb();
+  if (!db) {
+    console.warn('[Database] Cannot get trades: database not available');
+    return [];
+  }
+
+  try {
+    return await db
+      .select()
+      .from(trades)
+      .where(
+        and(
+          eq(trades.userId, userId),
+          gte(trades.createdAt, startDate),
+          lte(trades.createdAt, endDate)
+        )
+      )
+      .orderBy(desc(trades.createdAt));
+  } catch (error) {
+    console.error('[Database] Failed to get trades by date range:', error);
+    return [];
+  }
+}
+
+// Performance metrics queries
+export async function savePerformanceMetrics(userId: number, metrics: InsertPerformanceMetric): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn('[Database] Cannot save metrics: database not available');
+    return;
+  }
+
+  try {
+    await db.insert(performanceMetrics).values({
+      ...metrics,
+      userId
+    });
+  } catch (error) {
+    console.error('[Database] Failed to save metrics:', error);
+    throw error;
+  }
+}
+
+export async function getUserPerformanceMetrics(userId: number, limit: number = 30): Promise<any[]> {
+  const db = await getDb();
+  if (!db) {
+    console.warn('[Database] Cannot get metrics: database not available');
+    return [];
+  }
+
+  try {
+    return await db
+      .select()
+      .from(performanceMetrics)
+      .where(eq(performanceMetrics.userId, userId))
+      .orderBy(desc(performanceMetrics.date))
+      .limit(limit);
+  } catch (error) {
+    console.error('[Database] Failed to get metrics:', error);
+    return [];
+  }
+}
+
+export async function getLatestPerformanceMetrics(userId: number): Promise<any | null> {
+  const db = await getDb();
+  if (!db) {
+    console.warn('[Database] Cannot get metrics: database not available');
+    return null;
+  }
+
+  try {
+    const result = await db
+      .select()
+      .from(performanceMetrics)
+      .where(eq(performanceMetrics.userId, userId))
+      .orderBy(desc(performanceMetrics.date))
+      .limit(1);
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error('[Database] Failed to get latest metrics:', error);
+    return null;
+  }
+}
