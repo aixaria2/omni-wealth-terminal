@@ -1,4 +1,7 @@
 // Trading Engine Service - Core business logic
+import { calculateAllIndicators, IndicatorValues } from './indicatorsService';
+import { RiskManagementConfig, DEFAULT_RISK_CONFIG, calculateRiskLevels, checkRiskTriggers } from './riskManagementService';
+
 export interface TradingConfig {
   endpoints: Array<{ type: string; url: string }>;
   initialCash: number;
@@ -44,6 +47,8 @@ export interface TradingState {
   connection: ConnectionState;
   simMode: boolean;
   simDrift: number;
+  indicators: IndicatorValues;
+  riskConfig: RiskManagementConfig;
 }
 
 export const DEFAULT_CONFIG: TradingConfig = {
@@ -70,7 +75,13 @@ export const DEFAULT_STATE: TradingState = {
   stats: { sharpe: 0, atr: 0, smafast: 0, smaslow: 0 },
   connection: { type: 'NONE', status: 'DISCONNECTED', fails: 0 },
   simMode: false,
-  simDrift: 0
+  simDrift: 0,
+  indicators: {
+    rsi: 0,
+    macd: { line: 0, signal: 0, histogram: 0 },
+    bollingerBands: { upper: 0, middle: 0, lower: 0 }
+  },
+  riskConfig: DEFAULT_RISK_CONFIG
 };
 
 export class TradingEngine {
@@ -270,6 +281,22 @@ export class TradingEngine {
 
     // ATR
     this.state.stats.atr = stdDev * this.state.price * 100;
+
+    // Calculate technical indicators
+    this.state.indicators = calculateAllIndicators(prices);
+
+    // Check risk management triggers
+    if (this.state.riskConfig.enabled && this.state.position.type !== 'NONE') {
+      const riskLevels = calculateRiskLevels(this.state.position.entryPrice, this.state.position.type, this.state.riskConfig);
+      const trigger = checkRiskTriggers(this.state.price, riskLevels, this.state.position.type);
+      if (trigger === 'stop-loss') {
+        this.log('STOP-LOSS TRIGGERED at $' + this.state.price.toFixed(2), 'error');
+        this.executeTrade('CLOSE', 'STOP_LOSS');
+      } else if (trigger === 'take-profit') {
+        this.log('TAKE-PROFIT TRIGGERED at $' + this.state.price.toFixed(2), 'success');
+        this.executeTrade('CLOSE', 'TAKE_PROFIT');
+      }
+    }
   }
 
   private runAutoPilot(): void {
@@ -339,6 +366,11 @@ export class TradingEngine {
   setAutoMode(enabled: boolean): void {
     this.state.isAuto = enabled;
     this.log(`AUTO-PILOT ${enabled ? 'ENGAGED' : 'DISENGAGED'}`, 'info');
+    this.notifyListeners();
+  }
+
+  setRiskConfig(config: RiskManagementConfig): void {
+    this.state.riskConfig = config;
     this.notifyListeners();
   }
 
