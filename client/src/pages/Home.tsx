@@ -3,6 +3,7 @@ import { TradingEngine, TradingState, LogMessage, DEFAULT_STATE } from '@/lib/tr
 import { RiskManagementConfig } from '@/lib/riskManagementService';
 import { AlertsManager, Alert } from '@/lib/alertsService';
 import { BacktestEngine, BacktestResult } from '@/lib/backtestingService';
+import { authorityService } from '@/lib/authorityService';
 import Header from '@/components/Header';
 import MarketTicker from '@/components/MarketTicker';
 import Chart from '@/components/Chart';
@@ -13,6 +14,8 @@ import IndicatorsDisplay from '@/components/IndicatorsDisplay';
 import AnalyticsDashboard, { TradeRecord, PerformanceStats } from '@/components/AnalyticsDashboard';
 import AlertsPanel from '@/components/AlertsPanel';
 import BacktestingPanel from '@/components/BacktestingPanel';
+import AuthorityLoginModal from '@/components/AuthorityLoginModal';
+import AuthorityDashboard from '@/components/AuthorityDashboard';
 
 export default function Home() {
   const [state, setState] = useState<TradingState>(DEFAULT_STATE);
@@ -35,6 +38,16 @@ export default function Home() {
   const [alertsManager] = useState(() => new AlertsManager());
   const [backtestResults, setBacktestResults] = useState<BacktestResult | null>(null);
   const [isBacktestRunning, setIsBacktestRunning] = useState(false);
+  const [isAuthorityModalOpen, setIsAuthorityModalOpen] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = authorityService.subscribe((authenticated) => {
+      setIsAuthorized(authenticated);
+    });
+    setIsAuthorized(authorityService.isAuthenticated());
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const unsubscribeAlerts = alertsManager.subscribe((newAlerts) => {
@@ -137,13 +150,32 @@ export default function Home() {
     <div className="min-h-screen flex flex-col p-2 gap-2 text-xs bg-background">
       <Header state={state} />
 
+      {/* Authority Login Modal */}
+      <AuthorityLoginModal
+        isOpen={isAuthorityModalOpen}
+        onClose={() => setIsAuthorityModalOpen(false)}
+        onSuccess={() => setIsAuthorityModalOpen(false)}
+      />
+
       <div className="flex-1 flex gap-2 overflow-hidden">
         <div className="flex-[3] flex flex-col gap-2 min-w-0">
           <MarketTicker state={state} />
-          <Chart state={state} />
+          <Chart state={state} showPredictionLine={isAuthorized} />
         </div>
 
         <div className="flex-[1] min-w-[300px] flex flex-col gap-2 overflow-y-auto">
+          {/* Authority Access Button / Dashboard */}
+          {!isAuthorized ? (
+            <button
+              onClick={() => setIsAuthorityModalOpen(true)}
+              className="bg-gradient-to-r from-purple-900 to-purple-800 hover:from-purple-800 hover:to-purple-700 border border-purple-600 text-white text-[9px] font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+            >
+              <span>🔓</span> UNLOCK AUTHORITY ACCESS
+            </button>
+          ) : (
+            <AuthorityDashboard onLogout={() => setIsAuthorized(false)} />
+          )}
+
           <ExecutionPanel
             state={state}
             onBuy={handleBuy}

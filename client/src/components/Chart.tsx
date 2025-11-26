@@ -1,13 +1,24 @@
-import { useEffect, useRef } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { TradingState, DEFAULT_CONFIG } from '@/lib/tradingService';
+import { authorityService } from '@/lib/authorityService';
 
 interface ChartProps {
   state: TradingState;
+  showPredictionLine?: boolean;
 }
 
-export default function Chart({ state }: ChartProps) {
+export default function Chart({ state, showPredictionLine = false }: ChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = authorityService.subscribe((authenticated) => {
+      setIsAuthorized(authenticated);
+    });
+    setIsAuthorized(authorityService.isAuthenticated());
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -116,6 +127,63 @@ export default function Chart({ state }: ChartProps) {
     ctx.font = '9px JetBrains Mono';
     ctx.fillText('PROBABILISTIC FUTURE >>', startX + 10, startY - 10);
 
+    // Authority Prediction Line (only if authenticated)
+    if (isAuthorized && showPredictionLine) {
+      const predictionPoints = [];
+      const predictionLength = DEFAULT_CONFIG.projectionWindow;
+      const volatilityFactor = state.stats.atr * 0.08;
+      const trendStrength = Math.abs(slope) / (volatility + 0.0001);
+      const momentum = Math.min(trendStrength, 2);
+
+      for (let i = 0; i <= predictionLength; i++) {
+        const progress = i / predictionLength;
+        const oscillation = Math.sin(progress * Math.PI * 2) * volatilityFactor * (1 - progress * 0.3);
+        const trend = slope * i * (1 + momentum * 0.1);
+        const predictedPrice = lastPrice + trend + oscillation;
+        const x = startX + (i / predictionLength) * (endX - startX);
+        const y = toY(predictedPrice);
+        predictionPoints.push({ x, y });
+      }
+
+      // Draw prediction line
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(168, 85, 247, 0.8)';
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = 'rgba(168, 85, 247, 0.6)';
+      ctx.setLineDash([]);
+
+      predictionPoints.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      });
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Prediction confidence area
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
+      const upperPrediction = predictionPoints.map(pt => ({
+        ...pt,
+        y: pt.y - volatilityFactor * 2
+      }));
+      const lowerPrediction = predictionPoints.map(pt => ({
+        ...pt,
+        y: pt.y + volatilityFactor * 2
+      }));
+
+      ctx.moveTo(predictionPoints[0].x, predictionPoints[0].y);
+      upperPrediction.forEach(pt => ctx.lineTo(pt.x, pt.y));
+      lowerPrediction.reverse().forEach(pt => ctx.lineTo(pt.x, pt.y));
+      ctx.closePath();
+      ctx.fill();
+
+      // Authority label
+      ctx.fillStyle = '#a855f7';
+      ctx.font = 'bold 10px JetBrains Mono';
+      ctx.fillText('AUTHORITY PREDICTION', startX + 10, startY + 20);
+    }
+
     // Entry Line
     if (state.position.type !== 'NONE') {
       const entryY = toY(state.position.entryPrice);
@@ -131,13 +199,14 @@ export default function Chart({ state }: ChartProps) {
       ctx.font = '9px JetBrains Mono';
       ctx.fillText(`ENTRY: ${state.position.entryPrice.toFixed(2)}`, w - 100, entryY - 6);
     }
-  }, [state]);
+  }, [state, isAuthorized, showPredictionLine]);
 
   return (
     <div className="bg-card border border-border flex-1 relative rounded-lg flex flex-col overflow-hidden">
       <div className="bg-muted border-b border-border px-3 py-2 flex items-center justify-between">
         <span className="flex items-center gap-2 text-[10px] font-bold text-gray-500 tracking-widest">
           <Activity className="w-3 h-3" /> MARKET DATA + PREDICTIVE LAYOUT
+          {isAuthorized && <span className="text-purple-400 ml-2">⚡ AUTHORITY MODE</span>}
         </span>
         <span className="font-mono text-[9px] text-gray-600">
           {state.history.length > 0 ? `${state.history.length} TICKS` : 'WAITING FOR TICKS...'}
@@ -147,26 +216,7 @@ export default function Chart({ state }: ChartProps) {
         <canvas ref={canvasRef} />
         
         {/* HUD Overlay */}
-        <div className="absolute top-4 left-4 flex flex-col gap-2 pointer-events-none">
-          <div className="bg-black/80 border border-gray-800 p-3 rounded backdrop-blur-md shadow-lg min-w-[140px]">
-            <div className="text-[9px] text-gray-500 font-bold tracking-wider mb-1">SHARPE RATIO (EFFICIENCY)</div>
-            <div className="flex items-end justify-between">
-              <div className={`text-lg font-mono font-bold ${state.stats.sharpe > 2 ? 'text-emerald-400' : state.stats.sharpe < -2 ? 'text-rose-400' : 'text-gray-400'}`}>
-                {state.stats.sharpe.toFixed(2)}
-              </div>
-              <div className="w-12 h-1 bg-gray-800 rounded mb-1.5 overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-500 ${state.stats.sharpe > 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                  style={{ width: `${Math.min(100, Math.abs(state.stats.sharpe) * 20)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-          <div className="bg-black/80 border border-gray-800 p-3 rounded backdrop-blur-md shadow-lg min-w-[140px]">
-            <div className="text-[9px] text-gray-500 font-bold tracking-wider mb-1">PREDICTED VOLATILITY</div>
-            <div className="text-sm font-mono text-gray-400">{state.stats.atr.toFixed(2)}</div>
-          </div>
-        </div>
+        <div className="absolute top-4 left-4 flex flex-col gap-2 pointer-events-none"></div>
       </div>
     </div>
   );
